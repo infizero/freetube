@@ -1,5 +1,5 @@
-
-name: Build FreeTube iOS IPA
+```yaml
+name: Build FreeTube iOS 27 IPA
 
 on:
   workflow_dispatch:
@@ -10,16 +10,33 @@ permissions:
 jobs:
   build:
     runs-on: xcode-27
+    timeout-minutes: 60
 
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Show Xcode version
-        run: xcodebuild -version
+      - name: Show build environment
+        run: |
+          set -e
+          sw_vers
+          xcodebuild -version
+          xcodebuild -showsdks
+          xcrun --sdk iphoneos --show-sdk-version
+          xcodebuild -list \
+            -project FreeTube/FreeTube.xcodeproj
+
+      - name: Show Swift package lockfile
+        run: |
+          find . -name Package.resolved -print
+          while IFS= read -r file; do
+            echo "===== $file ====="
+            cat "$file"
+          done < <(find . -name Package.resolved -print)
 
       - name: Resolve Swift packages
         run: |
+          set -euo pipefail
           xcodebuild \
             -resolvePackageDependencies \
             -project FreeTube/FreeTube.xcodeproj \
@@ -36,28 +53,53 @@ jobs:
             -destination 'generic/platform=iOS' \
             -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             CODE_SIGNING_ALLOWED=NO \
-            build
+            build 2>&1 | tee "$RUNNER_TEMP/xcodebuild.log"
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FreeTube-iOS27-build-log
+          path: ${{ runner.temp }}/xcodebuild.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Package unsigned IPA
         run: |
+          set -euo pipefail
+
           APP="$RUNNER_TEMP/DerivedData/Build/Products/Release-iphoneos/FreeTube.app"
 
           if [ ! -d "$APP" ]; then
             echo "FreeTube.app not found"
-            find "$RUNNER_TEMP/DerivedData/Build/Products" -maxdepth 3 -name '*.app'
+            find "$RUNNER_TEMP/DerivedData/Build/Products" \
+              -maxdepth 4 \( -name '*.app' -o -name '*.framework' \) \
+              -print
             exit 1
           fi
 
+          echo "===== App metadata ====="
+          /usr/libexec/PlistBuddy \
+            -c 'Print :CFBundleIdentifier' "$APP/Info.plist"
+          /usr/libexec/PlistBuddy \
+            -c 'Print :CFBundleShortVersionString' "$APP/Info.plist"
+          /usr/libexec/PlistBuddy \
+            -c 'Print :CFBundleVersion' "$APP/Info.plist"
+
           mkdir -p "$RUNNER_TEMP/package/Payload"
-          cp -R "$APP" "$RUNNER_TEMP/package/Payload/FreeTube.app"
+          ditto "$APP" "$RUNNER_TEMP/package/Payload/FreeTube.app"
 
           cd "$RUNNER_TEMP/package"
-          zip -qry "$GITHUB_WORKSPACE/FreeTube-unsigned.ipa" Payload
+          /usr/bin/zip -qry "$GITHUB_WORKSPACE/FreeTube-unsigned.ipa" Payload
+
+          test -s "$GITHUB_WORKSPACE/FreeTube-unsigned.ipa"
+          unzip -l "$GITHUB_WORKSPACE/FreeTube-unsigned.ipa" | head -40
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: FreeTube-unsigned-IPA
+          name: FreeTube-iOS27-unsigned-IPA
           path: FreeTube-unsigned.ipa
           if-no-files-found: error
           retention-days: 7
+```
