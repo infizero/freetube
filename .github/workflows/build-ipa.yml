@@ -1,0 +1,63 @@
+
+name: Build FreeTube iOS IPA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Resolve Swift packages
+        run: |
+          xcodebuild \
+            -resolvePackageDependencies \
+            -project FreeTube/FreeTube.xcodeproj \
+            -scheme FreeTube
+
+      - name: Build unsigned iOS app
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project FreeTube/FreeTube.xcodeproj \
+            -scheme FreeTube \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Package unsigned IPA
+        run: |
+          APP="$RUNNER_TEMP/DerivedData/Build/Products/Release-iphoneos/FreeTube.app"
+
+          if [ ! -d "$APP" ]; then
+            echo "FreeTube.app not found"
+            find "$RUNNER_TEMP/DerivedData/Build/Products" -maxdepth 3 -name '*.app'
+            exit 1
+          fi
+
+          mkdir -p "$RUNNER_TEMP/package/Payload"
+          cp -R "$APP" "$RUNNER_TEMP/package/Payload/FreeTube.app"
+
+          cd "$RUNNER_TEMP/package"
+          zip -qry "$GITHUB_WORKSPACE/FreeTube-unsigned.ipa" Payload
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: FreeTube-unsigned-IPA
+          path: FreeTube-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 7
