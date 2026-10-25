@@ -20,10 +20,33 @@ jobs:
 
       - name: Resolve Swift packages
         run: |
+          set -euo pipefail
+
+          RESOLVED="FreeTube/FreeTube.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
+
+          rm -f "$RESOLVED"
+
           xcodebuild \
             -resolvePackageDependencies \
             -project FreeTube/FreeTube.xcodeproj \
             -scheme FreeTube
+
+          echo "===== Package.resolved ====="
+          find FreeTube -name Package.resolved -print
+          if [ -f "$RESOLVED" ]; then
+            cat "$RESOLVED"
+          else
+            echo "Package.resolved was not generated at the expected path"
+            exit 1
+          fi
+
+      - name: Upload resolved dependencies
+        uses: actions/upload-artifact@v4
+        with:
+          name: FreeTube-Package-resolved
+          path: FreeTube/FreeTube.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Build unsigned iOS app
         run: |
